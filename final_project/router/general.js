@@ -1,12 +1,12 @@
 const express = require('express')
 let books = require('./booksdb.js')
 let isValid = require('./auth_users.js').isValid
+let authenticatedUser = require('./auth_users.js').authenticatedUser
 let users = require('./auth_users.js').users
 const public_users = express.Router()
 const jwt = require('jsonwebtoken')
 const session = require('express-session')
 const axios = require('axios')
-
 
 
 public_users.post('/register', (req, res) => {
@@ -26,7 +26,7 @@ public_users.post('/register', (req, res) => {
 	return res.status(404).json({message: 'Unable to register user.'})
 })
 
-// Get the book list available in the shop
+
 const bookList = async () => {
 	try {
 		const bookListPromise = await Promise.resolve(books)
@@ -45,8 +45,8 @@ public_users.get('/', async function (req, res) {
 	res.json(list)
 })
 
-// Get book details based on ISBN
-const isbnList = async () => {
+
+const isbnList = async isbn => {
 	try {
 		const isbnPromise = await Promise.resolve(isbn)
 		if (isbnPromise) {
@@ -65,7 +65,7 @@ public_users.get('/isbn/:isbn', async function (req, res) {
 	res.send(books[isbnData])
  });
   
-// Get book details based on author
+
 const findAuthor = async author => {
 	try {
 		if (author) {
@@ -92,7 +92,7 @@ public_users.get('/author/:author', async (req, res) => {
 	res.send(authorList)
 })
 
-// Get all books based on 
+
 const findByTitle = async title => {
 	try {
 		if (title) {
@@ -113,21 +113,78 @@ const findByTitle = async title => {
 	}
 }
 
-public_users.get('/title/:title',function (req, res) {
+public_users.get('/title/:title', async function (req, res) {
 	const title = req.params.title
 	const titlesList = await findByTitle(title)
 	res.send(titlesList)
 });
 
-//  Get book review
-public_users.get('/review/:isbn', function (req, res) {
-	const reviewISBN = req.params.isbn
 
-	Object.entries(books).map(book => {
-		if (book[0] === reviewISBN) {
-			res.send(book[1].reviews)
+public_users.get('/review/:isbn', async function (req, res) {
+	const isbn = req.params.isbn
+    const isbnData = await isbnList(isbn)
+	res.send(books[isbnData].reviews)
+
+});
+
+public_users.use(
+	session({secret:"fingerpint"},resave=true,saveUninitialized=true)
+)
+
+
+public_users.post('/login', (req, res) => {
+	const username = req.body.username
+	const password = req.body.password
+
+	if (!username || !password) {
+		return res.status(404).json({message: 'Error logging in'})
+	}
+
+	if (authenticatedUser(username, password)) {
+		let accessToken = jwt.sign(
+			{
+				data: password,
+			},
+			'access',
+			{expiresIn: 60 * 60}
+		)
+
+		req.session.authorization = {
+			accessToken,
+			username,
 		}
-	})
+		return res.status(200).send('User successfully logged in')
+	} else {
+		return res
+			.status(208)
+			.json({message: 'Invalid Login. Check username and password'})
+	}
+});
+
+public_users.put('/auth/review/:isbn', (req, res) => {
+
+	const isbn = req.params.isbn
+	const review = req.body.review
+	const username = req.session.authorization.username
+	if (books[isbn]) {
+		let book = books[isbn]
+		book.reviews[username] = review
+		return res.status(200).send('Review successfully posted: '+ JSON.stringify(books[isbn]))
+	} else {
+		return res.status(404).json({message: `ISBN ${isbn} not found`})
+	}
+})
+
+public_users.delete('/auth/review/:isbn', (req, res) => {
+	const isbn = req.params.isbn
+	const username = req.session.authorization.username
+	if (books[isbn]) {
+		let book = books[isbn]
+		delete book.reviews[username]
+		return res.status(200).send('Review successfully deleted: ' + JSON.stringify(books[isbn]))
+	} else {
+		return res.status(404).json({message: `ISBN ${isbn} not found`})
+	}
 })
 
 module.exports.general = public_users;
